@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
 namespace ProcLens;
@@ -26,6 +27,22 @@ internal sealed class ClassificationRules
             ? rule.OwnerLabel ?? rule.Category
             : null;
 
+    public ClassificationRecommendation RecommendationFor(string processName, string? executablePath, string commandLine)
+    {
+        var matches = MatchingRules(processName, executablePath, commandLine).ToArray();
+        return matches.Length == 0
+            ? new ClassificationRecommendation()
+            : new ClassificationRecommendation
+            {
+                Criticality = matches.Max(rule => rule.Criticality),
+                RecommendationPolicy = matches.Max(rule => rule.RecommendationPolicy),
+                MinimumIdleMinutes = matches
+                    .Where(rule => rule.MinimumIdleMinutes.HasValue)
+                    .Select(rule => rule.MinimumIdleMinutes)
+                    .Max()
+            };
+    }
+
     internal static ClassificationRules LoadFromFiles(params string[] paths)
     {
         var rules = new List<ClassificationRule>();
@@ -52,11 +69,14 @@ internal sealed class ClassificationRules
     }
 
     private ClassificationRule? Match(string processName, string? executablePath, string commandLine)
+        => MatchingRules(processName, executablePath, commandLine).FirstOrDefault();
+
+    private IEnumerable<ClassificationRule> MatchingRules(string processName, string? executablePath, string commandLine)
     {
         var path = executablePath ?? "";
         var command = commandLine ?? "";
         var combined = $"{path} {command}";
-        return _rules.FirstOrDefault(rule => Matches(rule, processName, path, command, combined));
+        return _rules.Where(rule => Matches(rule, processName, path, command, combined));
     }
 
     private static bool Matches(ClassificationRule rule, string processName, string path, string command, string combined)
@@ -77,7 +97,8 @@ internal sealed class ClassificationRules
     private static bool ContainsAny(string source, string[]? values) =>
         values is null || values.Length == 0 || values.Any(value => source.Contains(value, StringComparison.OrdinalIgnoreCase));
 
-    private static bool IsValid(ClassificationRule rule) => !string.IsNullOrWhiteSpace(rule.Category);
+    private static bool IsValid(ClassificationRule rule) =>
+        !string.IsNullOrWhiteSpace(rule.Category) && rule.MinimumIdleMinutes is null or >= 0;
 
     private static ClassificationRules LoadInstalledRules()
     {
@@ -89,19 +110,88 @@ internal sealed class ClassificationRules
 
 internal sealed record ClassificationRuleDocument
 {
-    public int SchemaVersion { get; init; } = 1;
+    public const int CurrentSchemaVersion = 2;
+
+    [JsonPropertyName("schemaVersion")]
+    public int SchemaVersion { get; init; } = CurrentSchemaVersion;
+
+    [JsonPropertyName("rules")]
     public ClassificationRule[] Rules { get; init; } = [];
 }
 
 internal sealed record ClassificationRule
 {
+    [JsonPropertyName("category")]
     public required string Category { get; init; }
+
+    [JsonPropertyName("process")]
     public string? Process { get; init; }
+
+    [JsonPropertyName("pathContainsAll")]
     public string[]? PathContainsAll { get; init; }
+
+    [JsonPropertyName("commandContainsAll")]
     public string[]? CommandContainsAll { get; init; }
+
+    [JsonPropertyName("textContainsAny")]
     public string[]? TextContainsAny { get; init; }
+
+    [JsonPropertyName("textRegex")]
     public string? TextRegex { get; init; }
+
+    [JsonPropertyName("ownerRoot")]
     public bool OwnerRoot { get; init; }
+
+    [JsonPropertyName("ownerLabel")]
     public string? OwnerLabel { get; init; }
+
+    [JsonPropertyName("track")]
     public bool Track { get; init; } = true;
+
+    [JsonPropertyName("criticality")]
+    public ClassificationCriticality Criticality { get; init; }
+
+    [JsonPropertyName("recommendationPolicy")]
+    public RecommendationPolicy RecommendationPolicy { get; init; }
+
+    [JsonPropertyName("minimumIdleMinutes")]
+    public int? MinimumIdleMinutes { get; init; }
+}
+
+internal sealed record ClassificationRecommendation
+{
+    [JsonPropertyName("criticality")]
+    public ClassificationCriticality Criticality { get; init; }
+
+    [JsonPropertyName("recommendationPolicy")]
+    public RecommendationPolicy RecommendationPolicy { get; init; }
+
+    [JsonPropertyName("minimumIdleMinutes")]
+    public int? MinimumIdleMinutes { get; init; }
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<ClassificationCriticality>))]
+internal enum ClassificationCriticality
+{
+    [JsonStringEnumMemberName("normal")]
+    Normal,
+    [JsonStringEnumMemberName("important")]
+    Important,
+    [JsonStringEnumMemberName("protected")]
+    Protected,
+    [JsonStringEnumMemberName("system")]
+    System
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter<RecommendationPolicy>))]
+internal enum RecommendationPolicy
+{
+    [JsonStringEnumMemberName("default")]
+    Default,
+    [JsonStringEnumMemberName("investigateOnly")]
+    InvestigateOnly,
+    [JsonStringEnumMemberName("modelResident")]
+    ModelResident,
+    [JsonStringEnumMemberName("neverEnd")]
+    NeverEnd
 }

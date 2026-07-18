@@ -1,10 +1,10 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "rules": [
     { "category": "ViriCrew backend", "process": "viricrew" },
     { "category": "ViriCrew Desktop", "process": "viricrew-desktop", "ownerRoot": true, "ownerLabel": "ViriCrew Desktop" },
     { "category": "Cass", "process": "cass" },
-    { "category": "ViriVox", "process": "ViriVox" },
+    { "category": "ViriVox", "process": "ViriVox", "criticality": "important", "recommendationPolicy": "modelResident", "minimumIdleMinutes": 0 },
     { "category": "Jarvis", "process": "jarvis-orb" },
     { "category": "Vertex MCP", "textContainsAny": ["vertex-mcp"] },
     { "category": "ViriCrew MCP", "process": "node", "textRegex": "viricrew[\\\\/]dist[\\\\/]index\\.js" },

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "rules": [
     { "category": "Claude Desktop", "process": "claude", "pathContainsAll": ["WindowsApps"], "ownerRoot": true, "ownerLabel": "Claude Desktop" },
     { "category": "Claude Code", "process": "claude", "ownerRoot": true, "ownerLabel": "Claude Code" },
@@ -7,7 +7,8 @@
     { "category": "Windows Terminal", "process": "WindowsTerminal", "ownerRoot": true, "ownerLabel": "Windows Terminal" },
     { "category": "Chrome", "process": "chrome", "ownerRoot": true, "ownerLabel": "Chrome" },
     { "category": "Discord", "process": "Discord", "ownerRoot": true, "ownerLabel": "Discord" },
-    { "category": "explorer", "process": "explorer", "ownerRoot": true, "ownerLabel": "Windows Explorer", "track": false },
+    { "category": "explorer", "process": "explorer", "ownerRoot": true, "ownerLabel": "Windows Explorer", "track": false, "criticality": "protected", "recommendationPolicy": "neverEnd" },
+    { "category": "ProcLens", "process": "ProcLens", "ownerRoot": true, "ownerLabel": "ProcLens", "criticality": "protected", "recommendationPolicy": "neverEnd" },
     { "category": "pnpm install", "process": "node", "commandContainsAll": ["pnpm.cjs", "install"] },
     { "category": "Other Node", "process": "node" },
     { "category": "Other Bun", "process": "bun" },
@@ -15,6 +16,6 @@
     { "category": "Python", "process": "pythonw" },
     { "category": "WebView runtime", "process": "msedgewebview2" },
     { "category": "Docker Desktop", "process": "Docker Desktop" },
-    { "category": "WSL virtual machine", "process": "vmmemWSL" }
+    { "category": "WSL virtual machine", "process": "vmmemWSL", "criticality": "system", "recommendationPolicy": "neverEnd" }
   ]
 }
