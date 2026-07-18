@@ -8,13 +8,19 @@ namespace ProcLens;
 
 internal sealed class DashboardServer : IDisposable
 {
+    private const int MaximumHeaderBytes = 16 * 1024;
+    private const int MaximumJsonBodyBytes = 8 * 1024;
     private readonly string _dataDirectory;
     private readonly int _port;
     private readonly string _token;
     private readonly TcpListener _listener;
+    private readonly RecommendationStore _recommendationStore;
+    private readonly ProcessActionExecutor _actionExecutor;
+    private readonly bool _ownsDependencies;
     private readonly SemaphoreSlim _connections = new(8, 8);
     private CancellationTokenRegistration _stopRegistration;
     private Task? _loop;
+    private int _boundPort;
 
     public DashboardServer(string dataDirectory, int port, string token)
     {
@@ -22,11 +28,34 @@ internal sealed class DashboardServer : IDisposable
         _port = port;
         _token = token;
         _listener = new TcpListener(IPAddress.Loopback, port);
+        _recommendationStore = new RecommendationStore(dataDirectory, DashboardData.JsonOptions);
+        _actionExecutor = new ProcessActionExecutor(
+            _recommendationStore,
+            AppSettings.Load().ProcessActionsEnabled);
+        _ownsDependencies = true;
     }
+
+    internal DashboardServer(
+        string dataDirectory,
+        int port,
+        string token,
+        RecommendationStore recommendationStore,
+        ProcessActionExecutor actionExecutor)
+    {
+        _dataDirectory = dataDirectory;
+        _port = port;
+        _token = token;
+        _listener = new TcpListener(IPAddress.Loopback, port);
+        _recommendationStore = recommendationStore ?? throw new ArgumentNullException(nameof(recommendationStore));
+        _actionExecutor = actionExecutor ?? throw new ArgumentNullException(nameof(actionExecutor));
+    }
+
+    internal int BoundPort => _boundPort == 0 ? _port : _boundPort;
 
     public void Start(CancellationToken cancellationToken)
     {
         _listener.Start();
+        _boundPort = ((IPEndPoint)_listener.LocalEndpoint).Port;
         _stopRegistration = cancellationToken.Register(() => _listener.Stop());
         _loop = AcceptLoopAsync(cancellationToken);
     }
@@ -60,28 +89,42 @@ internal sealed class DashboardServer : IDisposable
             {
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 timeout.CancelAfter(TimeSpan.FromSeconds(5));
-                var headerText = await ReadHeaderAsync(stream, timeout.Token);
-                if (headerText is null) return;
-                var lines = headerText.Split("\r\n", StringSplitOptions.RemoveEmptyEntries);
-                var requestLine = lines.FirstOrDefault();
-                if (string.IsNullOrWhiteSpace(requestLine)) return;
-
-                var parts = requestLine.Split(' ', 3);
-                if (parts.Length < 2 || parts[0] != "GET")
+                DashboardRequest? request;
+                try
                 {
-                    await RespondAsync(stream, 405, "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("GET only"), cancellationToken);
+                    request = await ReadRequestAsync(stream, timeout.Token);
+                }
+                catch (RequestRejectedException rejection)
+                {
+                    await RespondJsonErrorAsync(stream, rejection.Status, rejection.Message, cancellationToken);
                     return;
                 }
+                if (request is null) return;
 
-                var host = lines.Skip(1).FirstOrDefault(x => x.StartsWith("Host:", StringComparison.OrdinalIgnoreCase))?[5..].Trim();
-                if (host is null || !(host.Equals($"127.0.0.1:{_port}", StringComparison.OrdinalIgnoreCase) ||
-                                      host.Equals($"localhost:{_port}", StringComparison.OrdinalIgnoreCase)))
+                if (!HostMatches(request.Headers.GetValueOrDefault("Host")))
                 {
                     await RespondAsync(stream, 403, "text/plain; charset=utf-8", Encoding.UTF8.GetBytes("Invalid local host."), cancellationToken);
                     return;
                 }
 
-                var uri = new Uri("http://127.0.0.1" + parts[1]);
+                if (!request.Target.StartsWith('/') || !Uri.TryCreate("http://127.0.0.1" + request.Target, UriKind.Absolute, out var uri))
+                {
+                    await RespondJsonErrorAsync(stream, 400, "Invalid request.", cancellationToken);
+                    return;
+                }
+
+                if (request.Method == "POST")
+                {
+                    await HandlePostAsync(stream, request, uri, cancellationToken);
+                    return;
+                }
+
+                if (request.Method != "GET")
+                {
+                    await RespondJsonErrorAsync(stream, 405, "Method not allowed.", cancellationToken);
+                    return;
+                }
+
                 if (uri.AbsolutePath == "/health")
                 {
                     await RespondAsync(stream, 200, "application/json; charset=utf-8", Encoding.UTF8.GetBytes("{\"status\":\"ok\"}"), cancellationToken);
@@ -127,6 +170,107 @@ internal sealed class DashboardServer : IDisposable
         }
     }
 
+    private async Task HandlePostAsync(
+        NetworkStream stream,
+        DashboardRequest request,
+        Uri uri,
+        CancellationToken cancellationToken)
+    {
+        if (!TokenMatches(uri.Query))
+        {
+            await RespondJsonErrorAsync(stream, 403, "Open ProcLens from its tray icon.", cancellationToken);
+            return;
+        }
+        if (!request.Headers.TryGetValue("Origin", out var origin) ||
+            !origin.Equals($"http://127.0.0.1:{BoundPort}", StringComparison.Ordinal))
+        {
+            await RespondJsonErrorAsync(stream, 403, "Invalid local origin.", cancellationToken);
+            return;
+        }
+        if (!request.Headers.TryGetValue("Content-Type", out var contentType) ||
+            !contentType.Equals("application/json", StringComparison.OrdinalIgnoreCase))
+        {
+            await RespondJsonErrorAsync(stream, 415, "JSON required.", cancellationToken);
+            return;
+        }
+        if (!request.HasContentLength)
+        {
+            await RespondJsonErrorAsync(stream, 400, "Invalid request.", cancellationToken);
+            return;
+        }
+
+        try
+        {
+            switch (uri.AbsolutePath)
+            {
+                case "/api/recommendations/needed":
+                {
+                    var body = DeserializeStrict<RecommendationIdRequest>(request.Body, "recommendationId");
+                    if (!IsRecommendationId(body.RecommendationId) || !_recommendationStore.MarkNeeded(new RecommendationDecision
+                        {
+                            RecommendationId = body.RecommendationId!,
+                            Decision = RecommendationDecisionKind.Needed,
+                            DecidedAtUtc = DateTimeOffset.UtcNow
+                        }))
+                    {
+                        await RespondJsonErrorAsync(stream, 404, "Recommendation not found.", cancellationToken);
+                        return;
+                    }
+                    await RespondOkAsync(stream, cancellationToken);
+                    return;
+                }
+                case "/api/recommendations/snooze":
+                {
+                    var body = DeserializeStrict<SnoozeRequest>(request.Body, "recommendationId", "snoozeMinutes");
+                    if (!IsRecommendationId(body.RecommendationId) || body.SnoozeMinutes is < 5 or > 10_080)
+                    {
+                        await RespondJsonErrorAsync(stream, 400, "Invalid request.", cancellationToken);
+                        return;
+                    }
+                    var decidedAt = DateTimeOffset.UtcNow;
+                    if (!_recommendationStore.Snooze(new RecommendationDecision
+                        {
+                            RecommendationId = body.RecommendationId!,
+                            Decision = RecommendationDecisionKind.Snooze,
+                            DecidedAtUtc = decidedAt,
+                            SnoozedUntilUtc = decidedAt.AddMinutes(body.SnoozeMinutes)
+                        }))
+                    {
+                        await RespondJsonErrorAsync(stream, 404, "Recommendation not found.", cancellationToken);
+                        return;
+                    }
+                    await RespondOkAsync(stream, cancellationToken);
+                    return;
+                }
+                case "/api/recommendations/closeGracefully":
+                {
+                    var body = DeserializeStrict<RecommendationIdRequest>(request.Body, "recommendationId");
+                    if (!IsRecommendationId(body.RecommendationId))
+                    {
+                        await RespondJsonErrorAsync(stream, 400, "Invalid request.", cancellationToken);
+                        return;
+                    }
+                    var result = await _actionExecutor.ExecuteAsync(
+                        body.RecommendationId!, ProcessActionRequestSource.UserDashboard, cancellationToken);
+                    await RespondAsync(stream, 200, "application/json; charset=utf-8",
+                        JsonSerializer.SerializeToUtf8Bytes(result, DashboardData.JsonOptions), cancellationToken);
+                    return;
+                }
+                default:
+                    await RespondJsonErrorAsync(stream, 404, "Not found.", cancellationToken);
+                    return;
+            }
+        }
+        catch (JsonException)
+        {
+            await RespondJsonErrorAsync(stream, 400, "Invalid JSON.", cancellationToken);
+        }
+        catch
+        {
+            await RespondJsonErrorAsync(stream, 500, "Request failed.", cancellationToken);
+        }
+    }
+
     private bool TokenMatches(string query)
     {
         var supplied = ParseQueryValue(query, "token");
@@ -136,12 +280,17 @@ internal sealed class DashboardServer : IDisposable
         return expectedBytes.Length == suppliedBytes.Length && CryptographicOperations.FixedTimeEquals(expectedBytes, suppliedBytes);
     }
 
-    private static async Task<string?> ReadHeaderAsync(NetworkStream stream, CancellationToken cancellationToken)
+    private bool HostMatches(string? host) =>
+        host is not null &&
+        (host.Equals($"127.0.0.1:{BoundPort}", StringComparison.OrdinalIgnoreCase) ||
+         host.Equals($"localhost:{BoundPort}", StringComparison.OrdinalIgnoreCase));
+
+    private static async Task<DashboardRequest?> ReadRequestAsync(NetworkStream stream, CancellationToken cancellationToken)
     {
-        const int maximum = 16 * 1024;
         var buffer = new byte[1024];
         using var memory = new MemoryStream();
-        while (memory.Length < maximum)
+        var headerEnd = -1;
+        while (memory.Length <= MaximumHeaderBytes)
         {
             var read = await stream.ReadAsync(buffer, cancellationToken);
             if (read == 0) return null;
@@ -151,11 +300,78 @@ internal sealed class DashboardServer : IDisposable
             for (var i = Math.Max(3, length - read - 3); i < length; i++)
             {
                 if (i >= 3 && bytes[i - 3] == 13 && bytes[i - 2] == 10 && bytes[i - 1] == 13 && bytes[i] == 10)
-                    return Encoding.ASCII.GetString(bytes, 0, i + 1);
+                {
+                    headerEnd = i + 1;
+                    break;
+                }
             }
+            if (headerEnd >= 0) break;
         }
-        return null;
+        if (headerEnd < 0 || headerEnd > MaximumHeaderBytes)
+            throw new RequestRejectedException(413, "Request too large.");
+
+        var headerText = Encoding.ASCII.GetString(memory.GetBuffer(), 0, headerEnd);
+        var lines = headerText.Split("\r\n", StringSplitOptions.None);
+        var parts = lines[0].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length != 3 || parts[2] != "HTTP/1.1")
+            throw new RequestRejectedException(400, "Invalid request.");
+
+        var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var line in lines.Skip(1).Where(line => line.Length > 0))
+        {
+            var separator = line.IndexOf(':');
+            if (separator <= 0 || !headers.TryAdd(line[..separator].Trim(), line[(separator + 1)..].Trim()))
+                throw new RequestRejectedException(400, "Invalid request.");
+        }
+        if (headers.ContainsKey("Transfer-Encoding"))
+            throw new RequestRejectedException(400, "Invalid request.");
+
+        var hasContentLength = headers.TryGetValue("Content-Length", out var lengthText);
+        var contentLength = 0;
+        if (hasContentLength && (!int.TryParse(lengthText, out contentLength) || contentLength < 0))
+            throw new RequestRejectedException(400, "Invalid request.");
+        if (contentLength > MaximumJsonBodyBytes)
+            throw new RequestRejectedException(413, "Request too large.");
+
+        var body = new byte[contentLength];
+        var bufferedBody = (int)memory.Length - headerEnd;
+        if (bufferedBody > contentLength)
+            throw new RequestRejectedException(400, "Invalid request.");
+        if (bufferedBody > 0)
+            Buffer.BlockCopy(memory.GetBuffer(), headerEnd, body, 0, bufferedBody);
+        var offset = bufferedBody;
+        while (offset < contentLength)
+        {
+            var read = await stream.ReadAsync(body.AsMemory(offset, contentLength - offset), cancellationToken);
+            if (read == 0) throw new RequestRejectedException(400, "Invalid request.");
+            offset += read;
+        }
+
+        return new DashboardRequest(parts[0], parts[1], headers, body, hasContentLength);
     }
+
+    private static T DeserializeStrict<T>(byte[] body, params string[] fields)
+    {
+        if (body.Length == 0) throw new JsonException();
+        using var document = JsonDocument.Parse(body, new JsonDocumentOptions { MaxDepth = 8 });
+        if (document.RootElement.ValueKind != JsonValueKind.Object) throw new JsonException();
+        var names = document.RootElement.EnumerateObject().Select(property => property.Name).ToArray();
+        if (names.Length != fields.Length || names.Distinct(StringComparer.Ordinal).Count() != names.Length ||
+            !names.OrderBy(name => name, StringComparer.Ordinal).SequenceEqual(fields.OrderBy(name => name, StringComparer.Ordinal), StringComparer.Ordinal))
+            throw new JsonException();
+
+        var options = new JsonSerializerOptions(DashboardData.JsonOptions)
+        {
+            PropertyNameCaseInsensitive = false,
+            UnmappedMemberHandling = System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow,
+            MaxDepth = 8
+        };
+        return JsonSerializer.Deserialize<T>(body, options) ?? throw new JsonException();
+    }
+
+    private static bool IsRecommendationId(string? value) =>
+        value is { Length: >= 1 and <= 128 } &&
+        value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.');
 
     private static int ParseMinutes(string query)
     {
@@ -181,7 +397,17 @@ internal sealed class DashboardServer : IDisposable
 
     private static async Task RespondAsync(NetworkStream stream, int status, string contentType, byte[] body, CancellationToken cancellationToken)
     {
-        var reason = status switch { 200 => "OK", 403 => "Forbidden", 404 => "Not Found", 405 => "Method Not Allowed", _ => "Internal Server Error" };
+        var reason = status switch
+        {
+            200 => "OK",
+            400 => "Bad Request",
+            403 => "Forbidden",
+            404 => "Not Found",
+            405 => "Method Not Allowed",
+            413 => "Content Too Large",
+            415 => "Unsupported Media Type",
+            _ => "Internal Server Error"
+        };
         var header = Encoding.ASCII.GetBytes(
             $"HTTP/1.1 {status} {reason}\r\nContent-Type: {contentType}\r\nContent-Length: {body.Length}\r\n" +
             "Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\n" +
@@ -191,18 +417,49 @@ internal sealed class DashboardServer : IDisposable
         await stream.WriteAsync(body, cancellationToken);
     }
 
+    private static Task RespondOkAsync(NetworkStream stream, CancellationToken cancellationToken) =>
+        RespondAsync(stream, 200, "application/json; charset=utf-8", Encoding.UTF8.GetBytes("{\"ok\":true}"), cancellationToken);
+
+    private static Task RespondJsonErrorAsync(NetworkStream stream, int status, string message, CancellationToken cancellationToken) =>
+        RespondAsync(stream, status, "application/json; charset=utf-8",
+            JsonSerializer.SerializeToUtf8Bytes(new { error = message }), cancellationToken);
+
     public void Dispose()
     {
         _stopRegistration.Dispose();
         _listener.Stop();
         _connections.Dispose();
+        if (_ownsDependencies) _recommendationStore.Dispose();
         if (_loop?.IsCompleted == true) _loop.Dispose();
+    }
+
+    private sealed record DashboardRequest(
+        string Method,
+        string Target,
+        Dictionary<string, string> Headers,
+        byte[] Body,
+        bool HasContentLength);
+
+    private sealed record RecommendationIdRequest
+    {
+        public string? RecommendationId { get; init; }
+    }
+
+    private sealed record SnoozeRequest
+    {
+        public string? RecommendationId { get; init; }
+        public int SnoozeMinutes { get; init; }
+    }
+
+    private sealed class RequestRejectedException(int status, string message) : Exception(message)
+    {
+        public int Status { get; } = status;
     }
 }
 
 internal static class DashboardData
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    internal static readonly JsonSerializerOptions JsonOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     public static byte[] Build(string dataDirectory, int minutes)
     {
@@ -214,44 +471,58 @@ internal static class DashboardData
 
         if (Directory.Exists(dataDirectory))
         {
-            foreach (var line in Program.ReadDashboardHistory(dataDirectory, cutoff))
+            try
             {
-                try
+                foreach (var line in Program.ReadDashboardHistory(dataDirectory, cutoff))
                 {
-                    using var doc = JsonDocument.Parse(line);
-                    var root = doc.RootElement;
-                    if (!TryDate(root, "timeUtc", out var time) || time < cutoff) continue;
-                    var type = Text(root, "type");
-                    if (type == "system_sample")
+                    try
                     {
-                        systems.Add(new SystemPoint(time, Number(root, "cpuPercent"), Number(root, "commitGb"),
-                            Number(root, "commitLimitGb"), Number(root, "physicalTotalGb"), Number(root, "physicalAvailableGb"),
-                            Integer(root, "processCount"), Integer(root, "threadCount"), Integer(root, "handleCount")));
+                        using var doc = JsonDocument.Parse(line);
+                        var root = doc.RootElement;
+                        if (!TryDate(root, "timeUtc", out var time) || time < cutoff) continue;
+                        var type = Text(root, "type");
+                        if (type == "system_sample")
+                        {
+                            systems.Add(new SystemPoint(time, Number(root, "cpuPercent"), Number(root, "commitGb"),
+                                Number(root, "commitLimitGb"), Number(root, "physicalTotalGb"), Number(root, "physicalAvailableGb"),
+                                Integer(root, "processCount"), Integer(root, "threadCount"), Integer(root, "handleCount")));
+                        }
+                        else if (type == "process_sample")
+                        {
+                            processes.Add(new ProcessPoint(time, Integer(root, "pid"), Text(root, "name"), Text(root, "category"),
+                                Text(root, "owner"), Flag(root, "unresolvedOwner") || Flag(root, "orphan"), Number(root, "privateMb"), Number(root, "workingSetMb"),
+                                Number(root, "cpuPercent"), Number(root, "readMbPerSec"), Number(root, "writeMbPerSec"), Number(root, "pageFaultsPerSec")));
+                        }
+                        else if (type is "process_start" or "process_stop" or "process_existing")
+                        {
+                            lifecycle.Add(new LifecycleEvent(time, type, Integer(root, "pid"), Text(root, "name"), Text(root, "category"),
+                                Text(root, "owner"), Flag(root, "unresolvedOwner") || Flag(root, "orphan")));
+                        }
+                        else if (type == "collector_start")
+                        {
+                            TryDate(root, "bootUtc", out var boot);
+                            runs.Add(new RunEvent(time, boot, Text(root, "runId")));
+                        }
                     }
-                    else if (type == "process_sample")
-                    {
-                        processes.Add(new ProcessPoint(time, Integer(root, "pid"), Text(root, "name"), Text(root, "category"),
-                            Text(root, "owner"), Flag(root, "unresolvedOwner") || Flag(root, "orphan"), Number(root, "privateMb"), Number(root, "workingSetMb"),
-                            Number(root, "cpuPercent"), Number(root, "readMbPerSec"), Number(root, "writeMbPerSec"), Number(root, "pageFaultsPerSec")));
-                    }
-                    else if (type is "process_start" or "process_stop" or "process_existing")
-                    {
-                        lifecycle.Add(new LifecycleEvent(time, type, Integer(root, "pid"), Text(root, "name"), Text(root, "category"),
-                            Text(root, "owner"), Flag(root, "unresolvedOwner") || Flag(root, "orphan")));
-                    }
-                    else if (type == "collector_start")
-                    {
-                        TryDate(root, "bootUtc", out var boot);
-                        runs.Add(new RunEvent(time, boot, Text(root, "runId")));
-                    }
+                    catch { /* Ignore partial writes and older incompatible lines. */ }
                 }
-                catch { /* Ignore partial writes and older incompatible lines. */ }
             }
+            catch { /* Recommendation-only databases may not have history tables yet. */ }
         }
 
         var latestProcessTime = processes.Count == 0 ? DateTime.MinValue : processes.Max(x => x.TimeUtc);
         var current = processes.Where(x => x.TimeUtc == latestProcessTime).ToList();
         var latestSystem = systems.LastOrDefault();
+        IReadOnlyList<RecommendationRecord> recommendations;
+        try
+        {
+            using var recommendationStore = new RecommendationStore(dataDirectory, JsonOptions);
+            recommendations = recommendationStore.ListCurrent();
+        }
+        catch
+        {
+            recommendations = Array.Empty<RecommendationRecord>();
+        }
 
         var categoryTotals = processes.GroupBy(x => new { x.TimeUtc, x.Category })
             .Select(g => new AggregatePoint(g.Key.TimeUtc, g.Key.Category, g.Sum(x => x.PrivateMb), g.Sum(x => x.CpuPercent), g.Any(x => x.Unresolved)))
@@ -315,6 +586,13 @@ internal static class DashboardData
                 starts,
                 stops
             },
+            potentialSavings = new
+            {
+                privateMemoryMb = Math.Round(recommendations.Sum(item => Math.Max(0, item.ExpectedImpact.PrivateMemoryMb)), 1),
+                sustainedCpuPct = Math.Round(recommendations.Sum(item => Math.Max(0, item.ExpectedImpact.SustainedCpuPct)), 1),
+                recommendationCount = recommendations.Count
+            },
+            recommendations,
             systemSeries = Downsample(systems.Select(x => new
             {
                 t = x.TimeUtc,
