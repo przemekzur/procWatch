@@ -14,7 +14,8 @@
     <nav aria-label="Dashboard sections">
       <a class="active" href="#overview" title="Overview"><span>01</span></a>
       <a href="#workloads" title="Workloads"><span>02</span></a>
-      <a href="#activity" title="Activity"><span>03</span></a>
+      <a href="#optimization" title="Optimization queue"><span>03</span></a>
+      <a href="#activity" title="Activity"><span>04</span></a>
     </nav>
     <div class="rail-foot"><i></i><span>LOCAL</span></div>
   </aside>
@@ -90,6 +91,13 @@
           <div><p class="kicker">PRESSURE SIGNAL</p><h2>What needs attention</h2></div>
           <span class="count-badge" id="signalCount">0</span>
         </div>
+        <div id="potentialSavings" class="savings-summary" aria-label="Potential savings from current recommendations">
+          <span class="savings-label">POTENTIAL RECLAIM</span>
+          <strong id="savingsMemory">—</strong>
+          <span class="savings-separator" aria-hidden="true">+</span>
+          <strong id="savingsCpu">—</strong>
+          <small id="savingsCount">Waiting for recommendations</small>
+        </div>
         <div id="signals" class="signals"><div class="empty">Evaluating workload…</div></div>
       </article>
     </section>
@@ -116,7 +124,18 @@
       </article>
     </section>
 
-    <section id="activity" class="grid-bottom reveal delay-4">
+    <section id="optimization" class="panel optimization-panel reveal delay-4" aria-labelledby="optimizationTitle">
+      <div class="panel-head optimization-head">
+        <div><p class="kicker">OPTIMIZATION QUEUE</p><h2 id="optimizationTitle">Ranked evidence ledger</h2></div>
+        <p class="optimization-guidance">USER DECISION REQUIRED · NEVER AUTOMATIC</p>
+      </div>
+      <div id="queueOutcome" class="queue-outcome" role="status" aria-live="polite" aria-atomic="true"></div>
+      <ol id="recommendations" class="recommendation-list" aria-label="Process optimization recommendations">
+        <li class="queue-state">Evaluating recommendations…</li>
+      </ol>
+    </section>
+
+    <section id="activity" class="grid-bottom reveal delay-5">
       <article class="panel unresolved-panel">
         <div class="panel-head">
           <div><p class="kicker">REVIEW QUEUE</p><h2>Processes with unresolved owners</h2></div>
