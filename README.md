@@ -28,6 +28,52 @@ History uses an indexed SQLite database in
 default. Existing ProcWatch JSONL history is imported once with paths, command
 lines, machine names, and user names removed; the original files are untouched.
 
+## Optimization queue and safe actions
+
+ProcLens can surface an optimization queue for complete application/process
+groups whose history suggests meaningful private-memory or sustained-CPU use.
+The queue is a prompt to review, not an automatic optimizer. Each item shows
+its source (core analysis or a CLI agent), evidence, confidence, action risk,
+and expected private-memory and sustained-CPU impact.
+
+Confidence is the evidence that a group is currently unnecessary; impact is an
+estimate of resources that could be recovered; risk is a separate categorical
+safety gate. A large memory number does not raise confidence, and an agent
+cannot raise ProcLens confidence above the policy ceiling. Agent-only advice is
+capped at 70% until ProcLens core evidence corroborates it.
+
+The dashboard lets an authenticated local user mark a recommendation Needed,
+Snooze it, or explicitly choose **Close gracefully** when that action is shown.
+There is no automatic termination and no force-termination feature. Before a
+graceful close, ProcLens revalidates the process identity (PID plus start time)
+and all current safety blocks. Protected, system, service-like, session-0,
+foreground, recently started, unresolved, changed-identity, `neverEnd`, and
+ProcLens targets are blocked.
+
+## Agent advisory CLI
+
+CLI agents are advisory-only and can never control a process. ProcLens exposes
+three versioned JSON commands (JSON on stdout, diagnostics on stderr):
+
+```powershell
+ProcLens.exe agent-snapshot --minutes 30 > snapshot.json
+ProcLens.exe recommendations list > recommendations.json
+ProcLens.exe recommendations import --file advisory.json --minutes 30
+```
+
+The snapshot is privacy-safe and includes group identities, history-derived
+metrics, activity, freshness, coverage, and safety flags—never command lines,
+paths, user/machine names, or environment values. Import accepts only fresh,
+version-1 advisory documents that match the current snapshot and complete group
+membership. It recomputes safety, identity, impact, and confidence, and accepts
+only the non-executing `investigate` action.
+
+To install the bundled Codex skill locally, copy
+`skills\proclens-process-advisor` into `%USERPROFILE%\.codex\skills\` and restart
+the CLI session. Invoke it for a slow-PC investigation or a ProcLens snapshot;
+it validates an advisory before import and refuses unsafe, stale, malformed, or
+overconfident submissions.
+
 ## Run from source
 
 Requirements: Windows 10/11 and the .NET 10 SDK.

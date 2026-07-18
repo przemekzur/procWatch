@@ -1,0 +1,4 @@
+interface:
+  display_name: "ProcLens Process Advisor"
+  short_description: "Safe ProcLens advisory workflow"
+  default_prompt: "Use $proclens-process-advisor to analyze a current ProcLens snapshot safely."
