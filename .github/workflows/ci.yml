@@ -1,0 +1,49 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-publish:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        runtime: [win-x64, win-arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Restore
+        run: dotnet restore ProcLens.csproj
+      - name: Build with warnings as errors
+        run: dotnet build ProcLens.csproj -c Release --no-restore -p:TreatWarningsAsErrors=true
+      - name: Test
+        if: matrix.runtime == 'win-x64'
+        run: dotnet test tests/ProcLens.Tests/ProcLens.Tests.csproj -c Release
+      - name: Publish ${{ matrix.runtime }}
+        run: dotnet publish ProcLens.csproj -c Release -r ${{ matrix.runtime }} --self-contained true -o artifacts/${{ matrix.runtime }}
+      - name: Smoke test packaged executable
+        if: matrix.runtime == 'win-x64'
+        shell: pwsh
+        run: |
+          $process = Start-Process artifacts/win-x64/ProcLens.exe -ArgumentList 'tray','--background','--port','4788','--data-dir',"$env:RUNNER_TEMP\proclens-smoke" -PassThru
+          try {
+            $ready = $false
+            1..20 | ForEach-Object {
+              if (-not $ready) {
+                try { $ready = (Invoke-WebRequest http://127.0.0.1:4788/health -UseBasicParsing -TimeoutSec 1).StatusCode -eq 200 } catch { Start-Sleep -Milliseconds 250 }
+              }
+            }
+            if (-not $ready) { throw 'Packaged dashboard health endpoint did not start.' }
+          } finally {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ProcLens-${{ matrix.runtime }}
+          path: artifacts/${{ matrix.runtime }}

@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>ProcLens — System Observatory</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="noise"></div>
+  <aside class="rail">
+    <div class="mark" aria-label="ProcLens">PL</div>
+    <nav aria-label="Dashboard sections">
+      <a class="active" href="#overview" title="Overview"><span>01</span></a>
+      <a href="#workloads" title="Workloads"><span>02</span></a>
+      <a href="#activity" title="Activity"><span>03</span></a>
+    </nav>
+    <div class="rail-foot"><i></i><span>LOCAL</span></div>
+  </aside>
+
+  <main>
+    <header class="masthead">
+      <div>
+        <p class="eyebrow">SYSTEM OBSERVATORY / <span id="machineState">CONNECTING</span></p>
+        <h1>Process pressure,<br><em>made visible.</em></h1>
+      </div>
+      <div class="controls">
+        <div class="range" role="group" aria-label="Time window">
+          <button data-minutes="15">15M</button>
+          <button class="active" data-minutes="60">1H</button>
+          <button data-minutes="360">6H</button>
+          <button data-minutes="1440">24H</button>
+          <button data-minutes="10080">7D</button>
+        </div>
+        <button id="refresh" class="refresh"><span>↻</span> REFRESH</button>
+        <p id="updated">Waiting for collector…</p>
+      </div>
+    </header>
+
+    <section id="overview" class="status-band reveal">
+      <div class="status-copy">
+        <div class="pulse"><i></i> <span id="statusLabel">READING SYSTEM</span></div>
+        <p id="statusNarrative">ProcLens is assembling the latest process sample.</p>
+      </div>
+      <div class="status-stat"><span>ACTIVE PROCESSES</span><strong id="processCount">—</strong></div>
+      <div class="status-stat"><span>TRACKED INSTANCES</span><strong id="trackedCount">—</strong></div>
+      <div class="status-stat warning"><span>UNRESOLVED OWNERS</span><strong id="unresolvedCount">—</strong></div>
+    </section>
+
+    <section class="metrics reveal delay-1" aria-label="Current system metrics">
+      <article class="metric primary">
+        <div class="metric-head"><span>COMMIT PRESSURE</span><b id="commitTrend">LIVE</b></div>
+        <div class="metric-value"><strong id="commitPercent">—</strong><sup>%</sup></div>
+        <p><span id="commitUsed">—</span> committed of <span id="commitLimit">—</span></p>
+        <div class="meter"><i id="commitBar"></i></div>
+      </article>
+      <article class="metric">
+        <div class="metric-head"><span>AVAILABLE MEMORY</span><b>PHYSICAL</b></div>
+        <div class="metric-value"><strong id="availableRam">—</strong><sup>GB</sup></div>
+        <p>of <span id="physicalTotal">—</span> GB installed</p>
+        <div class="microchart" id="ramSpark"></div>
+      </article>
+      <article class="metric">
+        <div class="metric-head"><span>SYSTEM CPU</span><b>ALL CORES</b></div>
+        <div class="metric-value"><strong id="cpuNow">—</strong><sup>%</sup></div>
+        <p>Current normalized utilization</p>
+        <div class="microchart" id="cpuSpark"></div>
+      </article>
+      <article class="metric">
+        <div class="metric-head"><span>TRACKED PRIVATE</span><b>PROCLENS</b></div>
+        <div class="metric-value"><strong id="trackedMemory">—</strong><sup>GB</sup></div>
+        <p><span id="launches">—</span> starts / <span id="stops">—</span> stops in range</p>
+        <div class="event-ticks" id="eventTicks"></div>
+      </article>
+    </section>
+
+    <section class="grid-main reveal delay-2">
+      <article class="panel telemetry">
+        <div class="panel-head">
+          <div><p class="kicker">SYSTEM TELEMETRY</p><h2>Memory pressure over time</h2></div>
+          <div class="legend"><span class="commit">Commit</span><span class="available">Available</span><span class="cpu">CPU</span></div>
+        </div>
+        <div id="systemChart" class="system-chart"><div class="empty">Waiting for history</div></div>
+        <div class="chart-axis"><span id="chartStart">—</span><span id="chartMid">—</span><span id="chartEnd">NOW</span></div>
+      </article>
+
+      <article class="panel signal-panel">
+        <div class="panel-head">
+          <div><p class="kicker">PRESSURE SIGNAL</p><h2>What needs attention</h2></div>
+          <span class="count-badge" id="signalCount">0</span>
+        </div>
+        <div id="signals" class="signals"><div class="empty">Evaluating workload…</div></div>
+      </article>
+    </section>
+
+    <section id="workloads" class="grid-work reveal delay-3">
+      <article class="panel workloads">
+        <div class="panel-head">
+          <div><p class="kicker">WORKLOAD MAP</p><h2>Memory by application</h2></div>
+          <p class="subtle">CURRENT / PEAK</p>
+        </div>
+        <div id="categories" class="category-list"></div>
+      </article>
+
+      <article class="panel owners-panel">
+        <div class="panel-head">
+          <div><p class="kicker">SESSION OWNERSHIP</p><h2>Who launched what</h2></div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>OWNER</th><th>PROCS</th><th>MEMORY</th><th>PEAK</th><th>CPU</th></tr></thead>
+            <tbody id="owners"></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+
+    <section id="activity" class="grid-bottom reveal delay-4">
+      <article class="panel unresolved-panel">
+        <div class="panel-head">
+          <div><p class="kicker">REVIEW QUEUE</p><h2>Processes with unresolved owners</h2></div>
+          <span class="caution">NOT AUTOMATICALLY STALE</span>
+        </div>
+        <div id="unresolved" class="unresolved-grid"></div>
+      </article>
+
+      <article class="panel activity-panel">
+        <div class="panel-head">
+          <div><p class="kicker">LIVE LEDGER</p><h2>Process activity</h2></div>
+          <span class="live-dot">LIVE</span>
+        </div>
+        <div id="activityFeed" class="activity-feed"></div>
+      </article>
+    </section>
+
+    <footer>
+      <div><span class="footer-mark">PROC/LENS</span><p>Local-only telemetry · private by default · no cloud transport</p></div>
+      <div id="runInfo">Waiting for collector run metadata</div>
+    </footer>
+  </main>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
