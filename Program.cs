@@ -23,18 +23,22 @@ internal static class Program
     public static int Main(string[] args)
     {
         ApplicationConfiguration.Initialize();
-        var settings = AppSettings.Load();
         var hasCommand = args.Length > 0 && !args[0].StartsWith('-');
         var command = hasCommand ? args[0].ToLowerInvariant() : "tray";
-        var options = Options.Parse(hasCommand ? args.Skip(1).ToArray() : args, settings);
+        var commandArguments = hasCommand ? args.Skip(1).ToArray() : args;
+        var machineReadable = command is "agent-snapshot" or "recommendations";
 
         try
         {
+            var settings = AppSettings.Load();
+            var options = Options.Parse(commandArguments, settings);
             return command switch
             {
                 "tray" => RunTray(options, !args.Contains("--background", StringComparer.OrdinalIgnoreCase)),
                 "collect" => CollectAsync(options, CancellationToken.None).GetAwaiter().GetResult(),
                 "snapshot" => Snapshot(options),
+                "agent-snapshot" => AgentSnapshot(commandArguments, options),
+                "recommendations" => Recommendations(commandArguments, options),
                 "report" => Report(options),
                 "dashboard" => OpenDashboard(options),
                 "install" => Install(),
@@ -44,8 +48,18 @@ internal static class Program
                 _ => Unknown(command)
             };
         }
+        catch (AgentCliException ex) when (machineReadable)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return ex.ExitCode;
+        }
         catch (Exception ex)
         {
+            if (machineReadable)
+            {
+                Console.Error.WriteLine(ex.Message);
+                return 1;
+            }
             MessageBox.Show(ex.Message, "ProcLens", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return 1;
         }
@@ -72,11 +86,16 @@ ProcLens - local-first Windows process/session history
   ProcLens tray       [--background]
   ProcLens collect    [--interval 10] [--scan 2] [--data-dir PATH]
   ProcLens dashboard  [--port 4777]
+  ProcLens agent-snapshot --minutes N [--data-dir PATH]
+  ProcLens recommendations list [--data-dir PATH]
+  ProcLens recommendations import --file PATH [--minutes N] [--data-dir PATH]
   ProcLens install | uninstall | doctor
 
 collect records process lifecycle plus periodic resource samples.
 snapshot prints the current app/session inventory without writing history.
 report summarizes recorded history for the requested time window.
+agent-snapshot and recommendations emit versioned JSON to stdout; diagnostics go to stderr.
+Agent imports are advisory only and never perform a process action.
 The normal app runs silently in the Windows notification area.
 """);
         return 0;
@@ -105,7 +124,10 @@ The normal app runs silently in the Windows notification area.
 
         var previous = new Dictionary<ProcessIdentity, ProcessState>();
         var cpu = new SystemCpuMeter();
+        var activityInspector = new ProcessActivityInspector();
         var nextSample = DateTime.UtcNow;
+        var nextRecommendationAnalysis = DateTime.UtcNow;
+        Task? recommendationAnalysis = null;
         var firstScan = true;
 
         writer.Write(new
@@ -123,7 +145,7 @@ The normal app runs silently in the Windows notification area.
         while (!cancellationToken.IsCancellationRequested)
         {
             var now = DateTime.UtcNow;
-            var current = Capture(previous, now);
+            var current = Capture(previous, now, activityInspector);
             var currentByPid = BuildPidIndex(current);
             var previousByPid = BuildPidIndex(previous);
 
@@ -143,6 +165,13 @@ The normal app runs silently in the Windows notification area.
                     WriteProcessSample(writer, state, currentByPid, runId, now);
                 }
                 writer.Flush();
+                if (options.RecommendationsEnabled && now >= nextRecommendationAnalysis &&
+                    (recommendationAnalysis is null || recommendationAnalysis.IsCompleted))
+                {
+                    var analysisSnapshot = current.ToDictionary(item => item.Key, item => item.Value);
+                    recommendationAnalysis = Task.Run(() => TryUpdateCoreRecommendations(options, analysisSnapshot, now));
+                    nextRecommendationAnalysis = now.AddSeconds(options.RecommendationAnalysisCadenceSeconds);
+                }
                 nextSample = now.AddSeconds(options.IntervalSeconds);
             }
 
@@ -165,9 +194,12 @@ The normal app runs silently in the Windows notification area.
 
     private static Dictionary<ProcessIdentity, ProcessState> Capture(
         Dictionary<ProcessIdentity, ProcessState> previous,
-        DateTime now)
+        DateTime now,
+        ProcessActivityInspector? activityInspector = null)
     {
         var result = new Dictionary<ProcessIdentity, ProcessState>();
+        activityInspector ??= new ProcessActivityInspector();
+        var globalActivity = activityInspector.CaptureGlobal(now);
         foreach (var process in Process.GetProcesses())
         {
             using (process)
@@ -177,7 +209,8 @@ The normal app runs silently in the Windows notification area.
                     var startUtc = process.StartTime.ToUniversalTime();
                     var identity = new ProcessIdentity(process.Id, startUtc.Ticks);
                     previous.TryGetValue(identity, out var old);
-                    var state = ProcessState.Capture(process, identity, startUtc, old, now);
+                    var activity = activityInspector.Inspect(process, globalActivity);
+                    var state = ProcessState.Capture(process, identity, startUtc, old, now, activity);
                     result[identity] = state;
                 }
                 catch
@@ -199,6 +232,9 @@ The normal app runs silently in the Windows notification area.
         Options options)
     {
         var owner = ResolveOwner(state, byPid);
+        var parentStartTicks = byPid.TryGetValue(state.ParentPid, out var parent) && parent.StartUtc <= state.StartUtc
+            ? parent.Identity.StartTicks
+            : (long?)null;
         writer.Write(new
         {
             type,
@@ -206,12 +242,19 @@ The normal app runs silently in the Windows notification area.
             runId,
             pid = state.Identity.Pid,
             parentPid = state.ParentPid,
+            parentStartTicks,
             startUtc = state.StartUtc,
             name = state.Name,
             category = state.Category,
             owner = owner.Label,
             ownerPid = owner.Pid,
+            ownerStartTicks = owner.StartTicks,
             unresolvedOwner = owner.Unresolved,
+            isForeground = state.IsForeground,
+            hasVisibleMainWindow = state.HasVisibleMainWindow,
+            sessionId = state.SessionId,
+            lastInputAgeSeconds = double.IsFinite(state.LastInputAgeSeconds) ? state.LastInputAgeSeconds : (double?)null,
+            processAgeSeconds = Math.Max(0, (now - state.StartUtc).TotalSeconds),
             path = options.CaptureExecutablePaths ? NormalizePath(state.Path) : null,
             command = options.CaptureCommandLines ? SanitizeCommand(state.CommandLine) : null,
             commandHash = state.CommandHash
@@ -226,6 +269,9 @@ The normal app runs silently in the Windows notification area.
         DateTime now)
     {
         var owner = ResolveOwner(state, byPid);
+        var parentStartTicks = byPid.TryGetValue(state.ParentPid, out var parent) && parent.StartUtc <= state.StartUtc
+            ? parent.Identity.StartTicks
+            : (long?)null;
         writer.Write(new
         {
             type = "process_sample",
@@ -233,11 +279,13 @@ The normal app runs silently in the Windows notification area.
             runId,
             pid = state.Identity.Pid,
             parentPid = state.ParentPid,
+            parentStartTicks,
             startUtc = state.StartUtc,
             name = state.Name,
             category = state.Category,
             owner = owner.Label,
             ownerPid = owner.Pid,
+            ownerStartTicks = owner.StartTicks,
             unresolvedOwner = owner.Unresolved,
             privateMb = ToMb(state.PrivateBytes),
             workingSetMb = ToMb(state.WorkingSetBytes),
@@ -246,8 +294,43 @@ The normal app runs silently in the Windows notification area.
             writeMbPerSec = state.WriteMbPerSec,
             pageFaultsPerSec = state.PageFaultsPerSec,
             handles = state.HandleCount,
-            threads = state.ThreadCount
+            threads = state.ThreadCount,
+            isForeground = state.IsForeground,
+            hasVisibleMainWindow = state.HasVisibleMainWindow,
+            sessionId = state.SessionId,
+            lastInputAgeSeconds = double.IsFinite(state.LastInputAgeSeconds) ? state.LastInputAgeSeconds : (double?)null,
+            processAgeSeconds = Math.Max(0, (now - state.StartUtc).TotalSeconds)
         });
+    }
+
+    private static void TryUpdateCoreRecommendations(
+        Options options,
+        IReadOnlyDictionary<ProcessIdentity, ProcessState> current,
+        DateTime now)
+    {
+        try
+        {
+            var builder = new AgentSnapshotBuilder(JsonOptions);
+            var observations = builder.BuildObservations(
+                ReadHistory(options.DataDirectory, now.AddMinutes(-options.RecommendationAnalysisWindowMinutes)),
+                current,
+                now,
+                options.RecommendationAnalysisWindowMinutes,
+                options.IntervalSeconds);
+            var engine = new RecommendationEngine(new RecommendationEngineOptions
+            {
+                MinimumInvestigateConfidencePct = options.MinimumDisplayedRecommendationConfidencePct
+            });
+            using var store = new RecommendationStore(options.DataDirectory, JsonOptions);
+            foreach (var recommendation in engine.Generate(observations, now, RecommendationSource.Core))
+                store.Upsert(recommendation);
+            store.Expire(now);
+        }
+        catch (Exception exception)
+        {
+            // Recommendations are shadow analysis. Telemetry collection must continue if they fail.
+            Console.Error.WriteLine($"Recommendation analysis skipped: {exception.Message}");
+        }
     }
 
     private static void WriteSystemSample(
@@ -297,21 +380,32 @@ The normal app runs silently in the Windows notification area.
         var visited = new HashSet<int>();
         for (var depth = 0; depth < 24; depth++)
         {
-            if (IsOwnerRoot(current))
-                return new OwnerInfo(OwnerLabel(current), current.Identity.Pid, false);
-
+            var isOwnerRoot = IsOwnerRoot(current);
             if (current.ParentPid <= 0 || !visited.Add(current.ParentPid) ||
                 !byPid.TryGetValue(current.ParentPid, out var parent) || parent.StartUtc > current.StartUtc)
-                return new OwnerInfo($"unresolved:{state.Name}:{state.Identity.Pid}", null, true);
+            {
+                if (isOwnerRoot)
+                    return new OwnerInfo(OwnerLabel(current), current.Identity.Pid, current.Identity.StartTicks, false);
+                return new OwnerInfo($"unresolved:{state.Name}:{state.Identity.Pid}", null, null, true);
+            }
+
+            if (isOwnerRoot && (!IsOwnerRoot(parent) || !IsSameOwnerFamily(current, parent)))
+                return new OwnerInfo(OwnerLabel(current), current.Identity.Pid, current.Identity.StartTicks, false);
 
             current = parent;
         }
 
-        return new OwnerInfo($"unresolved:{state.Name}:{state.Identity.Pid}", null, true);
+        return new OwnerInfo($"unresolved:{state.Name}:{state.Identity.Pid}", null, null, true);
     }
 
     private static bool IsOwnerRoot(ProcessState state) =>
         ClassificationRules.Current.IsOwnerRoot(state.Name, state.Path, state.CommandLine);
+
+    private static bool IsSameOwnerFamily(ProcessState first, ProcessState second) =>
+        string.Equals(OwnerFamily(first), OwnerFamily(second), StringComparison.OrdinalIgnoreCase);
+
+    private static string OwnerFamily(ProcessState state) =>
+        ClassificationRules.Current.OwnerLabel(state.Name, state.Path, state.CommandLine) ?? state.Name;
 
     private static string OwnerLabel(ProcessState state)
     {
@@ -389,6 +483,136 @@ The normal app runs silently in the Windows notification area.
         foreach (var row in rows)
             Console.WriteLine($"{Trim(row.Category, 22),-22} {Trim(row.Owner, 42),-42} {row.Count,5} {row.PrivateMb,8:F1}MB {row.WorkingSetMb,8:F1}MB  {row.Pids}");
         return 0;
+    }
+
+    internal static int AgentSnapshot(string[] arguments, Options options)
+    {
+        ValidateValueOptions(arguments, "--minutes", "--data-dir");
+        var now = DateTimeOffset.UtcNow;
+        var (document, _) = BuildAgentSnapshot(options, now);
+        Console.Out.WriteLine(JsonSerializer.Serialize(document, JsonOptions));
+        return 0;
+    }
+
+    internal static int Recommendations(string[] arguments, Options options)
+    {
+        if (arguments.Length == 0)
+            throw new AgentCliException(3, "Expected 'recommendations list' or 'recommendations import --file PATH'.");
+        return arguments[0].ToLowerInvariant() switch
+        {
+            "list" => ListRecommendations(arguments.Skip(1).ToArray(), options),
+            "import" => ImportRecommendations(arguments.Skip(1).ToArray(), options),
+            _ => throw new AgentCliException(3, $"Unknown recommendations subcommand: {arguments[0]}")
+        };
+    }
+
+    private static int ListRecommendations(string[] arguments, Options options)
+    {
+        ValidateValueOptions(arguments, "--data-dir");
+        var now = DateTimeOffset.UtcNow;
+        using var store = new RecommendationStore(options.DataDirectory, JsonOptions);
+        var document = new RecommendationListDocument
+        {
+            GeneratedAtUtc = now,
+            Recommendations = store.ListCurrent(now)
+                .Where(item => item.Confidence.Pct >= options.MinimumDisplayedRecommendationConfidencePct)
+                .OrderByDescending(item => item.Confidence.Pct)
+                .ThenBy(item => item.Id, StringComparer.Ordinal)
+                .ToArray()
+        };
+        Console.Out.WriteLine(JsonSerializer.Serialize(document, JsonOptions));
+        return 0;
+    }
+
+    private static void ValidateValueOptions(string[] arguments, params string[] allowedOptions)
+    {
+        var allowed = allowedOptions.ToHashSet(StringComparer.Ordinal);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var index = 0; index < arguments.Length; index++)
+        {
+            var option = arguments[index];
+            if (!allowed.Contains(option) || !seen.Add(option))
+                throw new AgentCliException(3, $"Unknown or duplicate option: {option}");
+            if (++index >= arguments.Length)
+                throw new AgentCliException(3, $"Missing value for {option}.");
+        }
+    }
+
+    private static int ImportRecommendations(string[] arguments, Options options)
+    {
+        string? file = null;
+        for (var index = 0; index < arguments.Length; index++)
+        {
+            if (arguments[index] == "--file" && index + 1 < arguments.Length && file is null)
+            {
+                file = Path.GetFullPath(arguments[++index]);
+                continue;
+            }
+            if (arguments[index] is "--data-dir" or "--minutes")
+            {
+                if (index + 1 >= arguments.Length) throw new AgentCliException(3, $"Missing value for {arguments[index]}.");
+                index++;
+                continue;
+            }
+            throw new AgentCliException(3, $"Unknown or duplicate import option: {arguments[index]}");
+        }
+        if (file is null) throw new AgentCliException(3, "recommendations import requires --file PATH.");
+        if (!File.Exists(file)) throw new AgentCliException(3, $"Advisory file does not exist: {file}");
+        var fileInfo = new FileInfo(file);
+        if (fileInfo.Length is <= 0 or > AgentSnapshotBuilder.MaximumAdvisoryBytes)
+            throw new AgentCliException(3, $"Advisory file exceeds the {AgentSnapshotBuilder.MaximumAdvisoryBytes}-byte limit or is empty.");
+
+        var builder = new AgentSnapshotBuilder(JsonOptions);
+        var advisory = builder.DeserializeAdvisory(File.ReadAllBytes(file));
+        var now = DateTimeOffset.UtcNow;
+        var (snapshot, observations) = BuildAgentSnapshot(options, now, builder);
+        var recommendations = builder.ValidateAdvisory(
+            advisory,
+            snapshot,
+            observations,
+            now,
+            options.MinimumDisplayedRecommendationConfidencePct);
+        using var store = new RecommendationStore(options.DataDirectory, JsonOptions);
+        foreach (var recommendation in recommendations) store.Upsert(recommendation, advisory.SnapshotHash);
+        var result = new RecommendationImportResult
+        {
+            AdvisoryId = advisory.AdvisoryId,
+            AcceptedCount = recommendations.Count,
+            RecommendationIds = recommendations.Select(item => item.Id).Order(StringComparer.Ordinal).ToArray()
+        };
+        Console.Out.WriteLine(JsonSerializer.Serialize(result, JsonOptions));
+        return 0;
+    }
+
+    private static (AgentSnapshotDocument Document, IReadOnlyList<ProcessObservation> Observations) BuildAgentSnapshot(
+        Options options,
+        DateTimeOffset now,
+        AgentSnapshotBuilder? builder = null)
+    {
+        builder ??= new AgentSnapshotBuilder(JsonOptions);
+        var current = Capture(new Dictionary<ProcessIdentity, ProcessState>(), now.UtcDateTime);
+        var observations = builder.BuildObservations(
+            ReadHistory(options.DataDirectory, now.UtcDateTime.AddMinutes(-options.ReportMinutes)),
+            current,
+            now,
+            options.ReportMinutes,
+            options.IntervalSeconds);
+        IReadOnlyList<RecommendationRecord> recommendations = [];
+        try
+        {
+            using var store = new RecommendationStore(options.DataDirectory, JsonOptions);
+            recommendations = store.ListCurrent(now);
+        }
+        catch (Exception exception)
+        {
+            Console.Error.WriteLine($"Current recommendations unavailable: {exception.Message}");
+        }
+        return (builder.Build(
+            now,
+            options.ReportMinutes,
+            observations,
+            recommendations,
+            options.MinimumDisplayedRecommendationConfidencePct), observations);
     }
 
     private static int Report(Options options)
@@ -545,7 +769,7 @@ The normal app runs silently in the Windows notification area.
 }
 
 internal readonly record struct ProcessIdentity(int Pid, long StartTicks);
-internal readonly record struct OwnerInfo(string Label, int? Pid, bool Unresolved);
+internal readonly record struct OwnerInfo(string Label, int? Pid, long? StartTicks, bool Unresolved);
 internal readonly record struct ReportSample(DateTime TimeUtc, string Category, string Owner, double PrivateMb, double WorkingSetMb, double CpuPercent, bool Unresolved);
 
 internal sealed class ProcessState
@@ -572,8 +796,18 @@ internal sealed class ProcessState
     public int HandleCount { get; init; }
     public int ThreadCount { get; init; }
     public DateTime CapturedUtc { get; init; }
+    public bool IsForeground { get; init; }
+    public bool HasVisibleMainWindow { get; init; }
+    public int SessionId { get; init; } = -1;
+    public double LastInputAgeSeconds { get; init; } = double.PositiveInfinity;
 
-    public static ProcessState Capture(Process process, ProcessIdentity identity, DateTime startUtc, ProcessState? old, DateTime now)
+    public static ProcessState Capture(
+        Process process,
+        ProcessIdentity identity,
+        DateTime startUtc,
+        ProcessState? old,
+        DateTime now,
+        ProcessActivitySnapshot activity)
     {
         var name = process.ProcessName;
         var path = old?.Path ?? Try(() => process.MainModule?.FileName);
@@ -610,7 +844,11 @@ internal sealed class ProcessState
             PageFaultsPerSec = old is null ? 0 : Math.Round(Math.Max(0, memory.PageFaultCount - Math.Min(memory.PageFaultCount, old.PageFaults)) / elapsed, 2),
             HandleCount = Try(() => process.HandleCount),
             ThreadCount = Try(() => process.Threads.Count),
-            CapturedUtc = now
+            CapturedUtc = now,
+            IsForeground = activity.IsForeground,
+            HasVisibleMainWindow = activity.HasVisibleMainWindow,
+            SessionId = activity.SessionId,
+            LastInputAgeSeconds = activity.LastInputAgeSeconds
         };
     }
 
@@ -655,7 +893,12 @@ internal sealed record Options(
     int RetentionDays,
     bool CaptureCommandLines,
     bool CaptureExecutablePaths,
-    string DashboardToken)
+    string DashboardToken,
+    bool RecommendationsEnabled,
+    int RecommendationAnalysisWindowMinutes,
+    int RecommendationAnalysisCadenceSeconds,
+    int MinimumDisplayedRecommendationConfidencePct,
+    bool ProcessActionsEnabled)
 {
     public static Options Parse(string[] args, AppSettings settings)
     {
@@ -672,18 +915,33 @@ internal sealed record Options(
             switch (args[i])
             {
                 case "--data-dir" when i + 1 < args.Length: data = System.IO.Path.GetFullPath(args[++i]); break;
-                case "--interval" when i + 1 < args.Length: interval = int.Parse(args[++i]); break;
-                case "--scan" when i + 1 < args.Length: scan = int.Parse(args[++i]); break;
-                case "--minutes" when i + 1 < args.Length: minutes = int.Parse(args[++i]); break;
-                case "--port" when i + 1 < args.Length: port = int.Parse(args[++i]); break;
-                case "--retention-days" when i + 1 < args.Length: retention = int.Parse(args[++i]); break;
+                case "--interval": interval = ParseNumericOption(args, ref i, "--interval"); break;
+                case "--scan": scan = ParseNumericOption(args, ref i, "--scan"); break;
+                case "--minutes": minutes = ParseNumericOption(args, ref i, "--minutes"); break;
+                case "--port": port = ParseNumericOption(args, ref i, "--port"); break;
+                case "--retention-days": retention = ParseNumericOption(args, ref i, "--retention-days"); break;
                 case "--capture-command-lines": captureCommands = true; break;
                 case "--capture-paths": capturePaths = true; break;
             }
         }
         return new Options(data, Math.Clamp(interval, 5, 300), Math.Clamp(scan, 2, 60),
             Math.Clamp(minutes, 1, 43200), Math.Clamp(port, 1024, 65535), Math.Clamp(retention, 1, 365),
-            captureCommands, capturePaths, settings.DashboardToken);
+            captureCommands, capturePaths, settings.DashboardToken,
+            settings.RecommendationsEnabled,
+            settings.RecommendationAnalysisWindowMinutes,
+            settings.RecommendationAnalysisCadenceSeconds,
+            settings.MinimumDisplayedRecommendationConfidencePct,
+            settings.ProcessActionsEnabled);
+    }
+
+    private static int ParseNumericOption(string[] args, ref int index, string option)
+    {
+        if (++index >= args.Length)
+            throw new AgentCliException(3, $"Missing value for {option}.");
+        if (!int.TryParse(args[index], System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var value))
+            throw new AgentCliException(3, $"Invalid numeric value for {option}: {args[index]}");
+        return value;
     }
 }
 

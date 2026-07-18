@@ -14,6 +14,11 @@ internal sealed record AppSettings
     public int SampleIntervalSeconds { get; init; } = 30;
     public int ScanIntervalSeconds { get; init; } = 5;
     public int DashboardPort { get; init; } = 4777;
+    public bool RecommendationsEnabled { get; init; } = true;
+    public int RecommendationAnalysisWindowMinutes { get; init; } = 60;
+    public int RecommendationAnalysisCadenceSeconds { get; init; } = 300;
+    public int MinimumDisplayedRecommendationConfidencePct { get; init; } = 30;
+    public bool ProcessActionsEnabled { get; init; }
     public string DashboardToken { get; init; } = CreateToken();
 
     public static string AppDirectory => Path.Combine(
@@ -43,6 +48,9 @@ internal sealed record AppSettings
             SampleIntervalSeconds = Math.Clamp(settings.SampleIntervalSeconds, 5, 300),
             ScanIntervalSeconds = Math.Clamp(settings.ScanIntervalSeconds, 2, 60),
             DashboardPort = Math.Clamp(settings.DashboardPort, 1024, 65535),
+            RecommendationAnalysisWindowMinutes = Math.Clamp(settings.RecommendationAnalysisWindowMinutes, 5, 1440),
+            RecommendationAnalysisCadenceSeconds = Math.Clamp(settings.RecommendationAnalysisCadenceSeconds, 30, 3600),
+            MinimumDisplayedRecommendationConfidencePct = Math.Clamp(settings.MinimumDisplayedRecommendationConfidencePct, 0, 95),
             DashboardToken = string.IsNullOrWhiteSpace(settings.DashboardToken) ? CreateToken() : settings.DashboardToken
         };
         settings.Save();
