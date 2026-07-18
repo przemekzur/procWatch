@@ -10,3 +10,4 @@ TestResults/
 *.db-wal
 *.jsonl
 *.zip
+.orchestrator/
