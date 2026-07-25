@@ -1,142 +1,188 @@
+<div align="center">
+
 # ProcLens
 
-ProcLens is a local-first Windows process-history application that explains
-where memory went, what launched, and which coding or desktop session owns each
-process tree. It runs quietly in the Windows notification area and serves a
-professional dashboard on loopback only.
+### Process pressure, made visible.
 
-## What it shows
+Local-first Windows process history, session ownership, and evidence-based
+resource recommendations—without cloud telemetry or automatic process killing.
 
-- Physical-memory and commit pressure over time.
-- Application and session-level private memory, CPU, I/O, handles, and threads.
-- Process starts and stops across collector runs and reboots.
-- Ownership tracing for terminals, browsers, Claude, Codex, and local tools.
-- A review queue for processes whose owner could not be resolved.
+[![CI](https://github.com/przemekzur/procWatch/actions/workflows/ci.yml/badge.svg)](https://github.com/przemekzur/procWatch/actions/workflows/ci.yml)
+[![Windows](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows)](https://github.com/przemekzur/procWatch)
+[![.NET 10](https://img.shields.io/badge/.NET-10-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-d8ff66.svg)](LICENSE)
 
-ProcLens is not a file/registry tracer and does not replace Sysinternals Process
-Monitor. It focuses on low-overhead historical resource and process genealogy.
+</div>
 
-## Privacy and security
+![ProcLens dashboard overview](docs/screenshots/dashboard-overview.png)
 
-ProcLens sends no telemetry and binds only to `127.0.0.1`. Its API validates the
-local Host header and requires a random per-install token. Command lines,
-executable paths, machine names, user names, and environment variables are not
-stored by default. See [PRIVACY.md](PRIVACY.md) for the complete data policy.
+<p align="center"><sub>Dashboard shown with illustrative, privacy-safe sample data.</sub></p>
 
-History uses an indexed SQLite database in
-`%LOCALAPPDATA%\ProcLens\data\proclens.db` and is retained for 14 days by
-default. Existing ProcWatch JSONL history is imported once with paths, command
-lines, machine names, and user names removed; the original files are untouched.
+ProcLens answers the questions Task Manager cannot answer after the moment has
+passed: **where did the memory go, what launched, which session owns it, and is
+it safe to close?** It runs quietly in the notification area, builds a local
+history, and serves its dashboard only on your machine.
 
-## Optimization queue and safe actions
+## Why ProcLens?
 
-ProcLens can surface an optimization queue for complete application/process
-groups whose history suggests meaningful private-memory or sustained-CPU use.
-The queue is a prompt to review, not an automatic optimizer. Each item shows
-its source (core analysis or a CLI agent), evidence, confidence, action risk,
-and expected private-memory and sustained-CPU impact.
+| Capability | What you get |
+| --- | --- |
+| Historical pressure | Physical memory, commit, CPU, I/O, handles, threads, starts, and stops across collector runs and reboots |
+| Process genealogy | Related processes grouped into applications and coding or desktop sessions |
+| Evidence-led recommendations | Confidence, expected impact, activity, risk, and supporting evidence kept separate |
+| Conservative actions | Explicit user decisions, graceful close only, and identity/safety revalidation immediately before action |
+| Agent-ready analysis | Privacy-safe JSON snapshots and a bundled skill for CLI agents to publish advisory findings |
+| Local by design | Loopback-only dashboard, per-install token, local SQLite history, and no telemetry |
 
-Confidence is the evidence that a group is currently unnecessary; impact is an
-estimate of resources that could be recovered; risk is a separate categorical
-safety gate. A large memory number does not raise confidence, and an agent
-cannot raise ProcLens confidence above the policy ceiling. Agent-only advice is
-capped at 70% until ProcLens core evidence corroborates it.
+ProcLens is intentionally narrower than Sysinternals Process Monitor. It is a
+low-overhead historical resource and ownership tool—not a file or Registry
+tracer.
 
-The dashboard lets an authenticated local user mark a recommendation Needed,
-Snooze it, or explicitly choose **Close gracefully** when that action is shown.
-There is no automatic termination and no force-termination feature. Before a
-graceful close, ProcLens revalidates the process identity (PID plus start time)
-and all current safety blocks. Protected, system, service-like, session-0,
-foreground, recently started, unresolved, changed-identity, `neverEnd`, and
-ProcLens targets are blocked.
+## Optimization without guesswork
 
-## Agent advisory CLI
+![ProcLens optimization queue](docs/screenshots/optimization-queue.png)
 
-CLI agents are advisory-only and can never control a process. ProcLens exposes
-three versioned JSON commands (JSON on stdout, diagnostics on stderr):
+Every recommendation keeps three separate ideas visible:
+
+- **Confidence** — evidence that the group is currently unnecessary.
+- **Impact** — an estimate of memory or sustained CPU that may be recovered.
+- **Risk** — a safety gate that can block an otherwise high-impact action.
+
+The queue is never an automatic optimizer. ProcLens does not expose force
+termination. Before a graceful close, it rechecks the PID and start time plus
+all current safety rules. System, service-like, session-0, foreground, recently
+started, unresolved, changed-identity, `neverEnd`, and ProcLens-owned targets
+are blocked.
+
+CLI agents are advisory-only. Agent confidence is capped at 70% until core
+ProcLens evidence corroborates it, and imported agent advice can only request
+`investigate`—never an executable action.
+
+## Install
+
+ProcLens currently builds from source. You need Windows 10 or 11 and the
+[.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
 
 ```powershell
-ProcLens.exe agent-snapshot --minutes 30 > snapshot.json
-ProcLens.exe recommendations list > recommendations.json
-ProcLens.exe recommendations import --file advisory.json --minutes 30
+git clone https://github.com/przemekzur/procWatch.git
+cd procWatch
+
+dotnet restore ProcLens.csproj --locked-mode
+dotnet publish ProcLens.csproj -c Release -r win-x64 --self-contained true --no-restore -o artifacts\win-x64
+.\artifacts\win-x64\ProcLens.exe install
 ```
 
-The snapshot is privacy-safe and includes group identities, history-derived
-metrics, activity, freshness, coverage, and safety flags—never command lines,
-paths, user/machine names, or environment values. Import accepts only fresh,
-version-1 advisory documents that match the current snapshot and complete group
-membership. It recomputes safety, identity, impact, and confidence, and accepts
-only the non-executing `investigate` action.
+For Windows on Arm, replace `win-x64` with `win-arm64`. The installer copies
+the self-contained app to `%LOCALAPPDATA%\Programs\ProcLens`, enables per-user
+startup, and launches the tray application. No separate .NET runtime is needed
+after publishing.
 
-To install the bundled Codex skill locally, copy
-`skills\proclens-process-advisor` into `%USERPROFILE%\.codex\skills\` and restart
-the CLI session. Invoke it for a slow-PC investigation or a ProcLens snapshot;
-it validates an advisory before import and refuses unsafe, stale, malformed, or
-overconfident submissions.
+To remove startup registration while preserving history:
 
-## Run from source
+```powershell
+ProcLens.exe uninstall
+```
 
-Requirements: Windows 10/11 and the .NET 10 SDK.
+## Use
+
+ProcLens starts in the Windows notification area without opening a terminal.
+Double-click the tray icon to open the dashboard. The tray menu can pause
+collection, open the data folder, show diagnostics, toggle startup, or exit.
+
+Useful commands:
+
+```powershell
+# Open the authenticated local dashboard
+ProcLens.exe dashboard
+
+# Verify configuration, storage, and collector health
+ProcLens.exe doctor
+
+# Export a privacy-safe analysis window
+ProcLens.exe agent-snapshot --minutes 60 > snapshot.json
+
+# Inspect or import advisory recommendations
+ProcLens.exe recommendations list > recommendations.json
+ProcLens.exe recommendations import --file advisory.json --minutes 60
+```
+
+Persistent settings live at `%LOCALAPPDATA%\ProcLens\settings.json`. History is
+stored in `%LOCALAPPDATA%\ProcLens\data\proclens.db` and retained for 14 days by
+default.
+
+Process actions are disabled by default. To make eligible **Close gracefully**
+buttons available, set `"processActionsEnabled": true` in `settings.json` and
+restart ProcLens. All safety blocks continue to apply.
+
+## Agent workflow
+
+The bundled [`proclens-process-advisor`](skills/proclens-process-advisor/SKILL.md)
+skill gives Codex-compatible CLI agents a strict workflow for slow-PC
+investigation:
+
+```text
+ProcLens snapshot → agent analysis → schema validation → policy recomputation
+                  → dashboard advisory → user decision
+```
+
+Copy `skills\proclens-process-advisor` to
+`%USERPROFILE%\.codex\skills\` and restart the CLI session. The skill validates
+advisories before import and refuses stale, malformed, incomplete,
+overconfident, or unsafe submissions.
+
+See the [agent contract reference](skills/proclens-process-advisor/references/contracts.md)
+for the versioned JSON schemas and policy boundaries.
+
+## Privacy and trust model
+
+ProcLens sends no telemetry and binds only to `127.0.0.1`. Its API validates
+the local Host header and requires a random per-install token. By default it
+does **not** store command lines, executable paths, machine names, user names,
+or environment variables.
+
+| Boundary | Guarantee |
+| --- | --- |
+| Network | Dashboard and API listen on loopback only |
+| Authentication | Random token generated for each installation |
+| Collection | Sensitive fields are opt-in and disabled by default |
+| Decisions | Recommendations never trigger actions automatically |
+| Execution | Graceful close only; no force-terminate feature |
+| Agent access | Privacy-safe snapshots in, non-executing advisories out |
+
+Read the full [privacy policy](PRIVACY.md), [security policy](SECURITY.md), and
+[security audit](SECURITY_AUDIT_REPORT.md).
+
+## Classification rules
+
+Generic application rules are defined in `rules.default.json`. To add or
+override classifications, create
+`%LOCALAPPDATA%\ProcLens\rules.json`; custom rules are evaluated before the
+defaults and take effect after restart.
+
+`rules.viricrew.example.json` demonstrates process-name, command-substring,
+regular-expression, and owner-root rules. Keep local rule files free of secrets
+and complete private command lines.
+
+## Develop
+
+```powershell
+dotnet restore ProcLens.csproj --locked-mode
+dotnet build ProcLens.csproj -c Release -p:TreatWarningsAsErrors=true --no-restore
+
+dotnet restore tests\ProcLens.Tests\ProcLens.Tests.csproj --locked-mode
+dotnet test tests\ProcLens.Tests\ProcLens.Tests.csproj -c Release --no-restore
+```
+
+Run the development build with:
 
 ```powershell
 dotnet run -c Release
 ```
 
-The app appears in the notification area without opening a terminal. Double
-click its icon to open the dashboard. The tray menu can pause collection, open
-the data folder, show diagnostics, enable startup, or exit.
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+Contributions should preserve local-only operation, privacy-safe defaults, and
+the conservative action model.
 
-## Build a release
+## License
 
-```powershell
-dotnet publish ProcLens.csproj -c Release -r win-x64 --self-contained true -o artifacts\publish\win-x64
-```
-
-Run `ProcLens.exe install` from that published folder to copy the release to
-`%LOCALAPPDATA%\Programs\ProcLens`, enable per-user startup, and launch the tray
-app. `ProcLens.exe uninstall` disables startup and preserves local history.
-
-## Diagnostic commands
-
-```text
-ProcLens.exe tray [--background]
-ProcLens.exe dashboard
-ProcLens.exe doctor
-```
-
-Advanced opt-ins:
-
-```text
---capture-command-lines
---capture-paths
---retention-days 30
---interval 30
---scan 5
---data-dir PATH
-```
-
-Persistent settings live at `%LOCALAPPDATA%\ProcLens\settings.json`. Opt-in
-flags affect only the current invocation unless the equivalent property is
-changed in that settings file.
-
-## Classification rules
-
-Generic application rules are defined in `rules.default.json`; the collector
-contains no ViriCrew-, project-, or vendor-specific classifier code. To add or
-override classifications, create `%LOCALAPPDATA%\ProcLens\rules.json`. Custom
-rules are evaluated before the generic defaults and take effect after restart.
-
-`rules.viricrew.example.json` demonstrates process-name, command substring,
-regular-expression, and owner-root rules. Copy it to the path above only if you
-want those integrations. Rule files are local configuration and must never
-contain secrets or full private command lines.
-
-## Development
-
-```powershell
-dotnet build ProcLens.csproj -c Release -p:TreatWarningsAsErrors=true
-dotnet test tests\ProcLens.Tests\ProcLens.Tests.csproj -c Release
-```
-
-ProcLens is licensed under the [MIT License](LICENSE). Contributions should
-preserve local-only operation and privacy-safe defaults.
+ProcLens is available under the [MIT License](LICENSE).
