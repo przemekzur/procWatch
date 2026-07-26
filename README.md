@@ -80,7 +80,8 @@ after publishing.
 To remove startup registration while preserving history:
 
 ```powershell
-ProcLens.exe uninstall
+$ProcLens = Join-Path $env:LOCALAPPDATA "Programs\ProcLens\ProcLens.exe"
+& $ProcLens uninstall
 ```
 
 ## Use
@@ -92,18 +93,20 @@ collection, open the data folder, show diagnostics, toggle startup, or exit.
 Useful commands:
 
 ```powershell
+$ProcLens = Join-Path $env:LOCALAPPDATA "Programs\ProcLens\ProcLens.exe"
+
 # Open the authenticated local dashboard
-ProcLens.exe dashboard
+& $ProcLens dashboard
 
 # Verify configuration, storage, and collector health
-ProcLens.exe doctor
+& $ProcLens doctor
 
 # Export a privacy-safe analysis window
-ProcLens.exe agent-snapshot --minutes 60 > snapshot.json
+& $ProcLens agent-snapshot --minutes 60 > snapshot.json
 
 # Inspect or import advisory recommendations
-ProcLens.exe recommendations list > recommendations.json
-ProcLens.exe recommendations import --file advisory.json --minutes 60
+& $ProcLens recommendations list > recommendations.json
+& $ProcLens recommendations import --file advisory.json --minutes 60
 ```
 
 Persistent settings live at `%LOCALAPPDATA%\ProcLens\settings.json`. History is
