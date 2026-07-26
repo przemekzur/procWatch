@@ -1,0 +1,169 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900" role="img" aria-labelledby="title desc">
+  <title id="title">ProcLens dashboard overview</title>
+  <desc id="desc">A dark system observatory dashboard showing process pressure, memory, CPU, telemetry history, and optimization signals using illustrative sample data.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#080b0d"/>
+      <stop offset=".58" stop-color="#0a0e10"/>
+      <stop offset="1" stop-color="#101819"/>
+    </linearGradient>
+    <linearGradient id="status" x1="0" x2="1">
+      <stop stop-color="#d8ff66" stop-opacity=".09"/>
+      <stop offset=".42" stop-color="#d8ff66" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="chartFill" x1="0" x2="0" y1="0" y2="1">
+      <stop stop-color="#d8ff66" stop-opacity=".17"/>
+      <stop offset="1" stop-color="#d8ff66" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="glow" x="-100%" y="-100%" width="300%" height="300%">
+      <feGaussianBlur stdDeviation="4" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <pattern id="grid" width="80" height="55" patternUnits="userSpaceOnUse">
+      <path d="M80 0H0V55" fill="none" stroke="#e0e8e5" stroke-opacity=".055"/>
+    </pattern>
+  </defs>
+
+  <rect width="1440" height="900" rx="18" fill="url(#bg)"/>
+  <rect x=".5" y=".5" width="1439" height="899" rx="17.5" fill="none" stroke="#e0e8e5" stroke-opacity=".14"/>
+
+  <!-- Navigation rail -->
+  <rect width="72" height="900" rx="18" fill="#080b0d"/>
+  <path d="M72 0V900" stroke="#e0e8e5" stroke-opacity=".12"/>
+  <path d="M0 72H72" stroke="#e0e8e5" stroke-opacity=".12"/>
+  <rect width="72" height="72" rx="18" fill="#d8ff66"/>
+  <rect y="54" width="72" height="18" fill="#d8ff66"/>
+  <text x="36" y="44" fill="#080b0d" text-anchor="middle" font-family="Bahnschrift, Segoe UI, sans-serif" font-size="18" font-weight="800" letter-spacing="-1">PL</text>
+  <g font-family="Cascadia Mono, Consolas, monospace" font-size="10" text-anchor="middle">
+    <rect x="17" y="112" width="38" height="38" fill="#d8ff66" fill-opacity=".045" stroke="#e0e8e5" stroke-opacity=".22"/>
+    <text x="36" y="135" fill="#d8ff66">01</text>
+    <text x="36" y="185" fill="#65706b">02</text>
+    <text x="36" y="229" fill="#65706b">03</text>
+    <text x="36" y="273" fill="#65706b">04</text>
+  </g>
+  <circle cx="36" cy="834" r="4" fill="#d8ff66" filter="url(#glow)"/>
+  <text x="39" y="872" transform="rotate(-90 39 872)" fill="#89928e" font-family="Cascadia Mono, Consolas, monospace" font-size="9" letter-spacing="2">LOCAL</text>
+
+  <!-- Header -->
+  <text x="120" y="66" fill="#89928e" font-family="Cascadia Mono, Consolas, monospace" font-size="10" font-weight="700" letter-spacing="2.2">SYSTEM OBSERVATORY / <tspan fill="#d8ff66">STABLE</tspan></text>
+  <text x="120" y="119" fill="#e8ece8" font-family="Bahnschrift Condensed, Segoe UI, sans-serif" font-size="54" font-weight="600" letter-spacing="-2.2">PROCESS PRESSURE,</text>
+  <text x="120" y="164" fill="#89928e" font-family="Bahnschrift Condensed, Segoe UI, sans-serif" font-size="54" font-weight="300" letter-spacing="-2.2">MADE VISIBLE.</text>
+
+  <g transform="translate(991 50)" font-family="Cascadia Mono, Consolas, monospace" font-size="10" font-weight="700">
+    <rect width="296" height="38" fill="#101417" stroke="#e0e8e5" stroke-opacity=".14"/>
+    <rect x="59" width="59" height="38" fill="#d8ff66"/>
+    <text x="29" y="24" fill="#89928e" text-anchor="middle">15M</text>
+    <text x="88" y="24" fill="#080b0d" text-anchor="middle">1H</text>
+    <text x="147" y="24" fill="#89928e" text-anchor="middle">6H</text>
+    <text x="206" y="24" fill="#89928e" text-anchor="middle">24H</text>
+    <text x="266" y="24" fill="#89928e" text-anchor="middle">7D</text>
+    <rect x="308" width="84" height="38" fill="none" stroke="#e0e8e5" stroke-opacity=".18"/>
+    <text x="350" y="24" fill="#89928e" text-anchor="middle">↻ REFRESH</text>
+    <text x="392" y="58" fill="#56605b" text-anchor="end" font-size="9">UPDATED 8 SEC AGO</text>
+  </g>
+
+  <!-- Status -->
+  <g transform="translate(120 205)">
+    <rect width="1270" height="82" fill="url(#status)" stroke="#e0e8e5" stroke-opacity=".14"/>
+    <rect width="3" height="82" fill="#d8ff66"/>
+    <circle cx="27" cy="27" r="4" fill="#d8ff66" filter="url(#glow)"/>
+    <text x="42" y="31" fill="#d8ff66" font-family="Cascadia Mono, Consolas, monospace" font-size="10" font-weight="700" letter-spacing="1.5">SYSTEM STABLE</text>
+    <text x="25" y="56" fill="#89928e" font-family="Segoe UI, sans-serif" font-size="12">Resource pressure is within the normal range. Two groups are worth reviewing.</text>
+    <g font-family="Cascadia Mono, Consolas, monospace">
+      <path d="M730 0V82M910 0V82M1090 0V82" stroke="#e0e8e5" stroke-opacity=".12"/>
+      <text x="754" y="27" fill="#89928e" font-size="9" letter-spacing="1.3">ACTIVE PROCESSES</text>
+      <text x="754" y="59" fill="#e8ece8" font-family="Bahnschrift, Segoe UI, sans-serif" font-size="28">142</text>
+      <text x="934" y="27" fill="#89928e" font-size="9" letter-spacing="1.3">TRACKED INSTANCES</text>
+      <text x="934" y="59" fill="#e8ece8" font-family="Bahnschrift, Segoe UI, sans-serif" font-size="28">1,284</text>
+      <text x="1114" y="27" fill="#89928e" font-size="9" letter-spacing="1.3">UNRESOLVED OWNERS</text>
+      <text x="1114" y="59" fill="#ffb85c" font-family="Bahnschrift, Segoe UI, sans-serif" font-size="28">3</text>
+    </g>
+  </g>
+
+  <!-- Metrics -->
+  <g transform="translate(120 287)">
+    <rect width="1270" height="186" fill="#101417" fill-opacity=".7" stroke="#e0e8e5" stroke-opacity=".14"/>
+    <path d="M317.5 0V186M635 0V186M952.5 0V186" stroke="#e0e8e5" stroke-opacity=".12"/>
+    <g font-family="Cascadia Mono, Consolas, monospace" font-size="9" letter-spacing="1.3">
+      <text x="24" y="28" fill="#89928e">COMMIT PRESSURE</text><text x="293" y="28" fill="#4f5a55" text-anchor="end">LIVE</text>
+      <text x="342" y="28" fill="#89928e">AVAILABLE MEMORY</text><text x="610" y="28" fill="#4f5a55" text-anchor="end">PHYSICAL</text>
+      <text x="659" y="28" fill="#89928e">SYSTEM CPU</text><text x="928" y="28" fill="#4f5a55" text-anchor="end">ALL CORES</text>
+      <text x="977" y="28" fill="#89928e">TRACKED PRIVATE</text><text x="1246" y="28" fill="#4f5a55" text-anchor="end">PROCLENS</text>
+    </g>
+    <g font-family="Bahnschrift Condensed, Segoe UI, sans-serif">
+      <text x="24" y="97" fill="#e8ece8" font-size="58">41<tspan fill="#89928e" font-family="Cascadia Mono, Consolas, monospace" font-size="14">%</tspan></text>
+      <text x="342" y="97" fill="#e8ece8" font-size="58">18.6<tspan fill="#89928e" font-family="Cascadia Mono, Consolas, monospace" font-size="14">GB</tspan></text>
+      <text x="659" y="97" fill="#e8ece8" font-size="58">12<tspan fill="#89928e" font-family="Cascadia Mono, Consolas, monospace" font-size="14">%</tspan></text>
+      <text x="977" y="97" fill="#e8ece8" font-size="58">9.4<tspan fill="#89928e" font-family="Cascadia Mono, Consolas, monospace" font-size="14">GB</tspan></text>
+    </g>
+    <g fill="#89928e" font-family="Cascadia Mono, Consolas, monospace" font-size="10">
+      <text x="24" y="128">13.1 GB committed of 31.9 GB</text>
+      <text x="342" y="128">of 31.7 GB installed</text>
+      <text x="659" y="128">Current normalized utilization</text>
+      <text x="977" y="128">18 starts / 7 stops in range</text>
+    </g>
+    <rect x="24" y="158" width="269" height="3" fill="#252b29"/><rect x="24" y="158" width="110" height="3" fill="#d8ff66"/>
+    <path d="M342 160 C360 151 376 157 393 146 S431 152 450 141 S487 149 505 137 S546 142 610 132" fill="none" stroke="#6fe7df" stroke-width="1.5"/>
+    <path d="M659 153 C680 158 698 137 717 144 S756 133 777 149 S817 141 837 145 S878 126 928 139" fill="none" stroke="#ffb85c" stroke-width="1.5"/>
+    <g fill="#e0e8e5" fill-opacity=".19">
+      <rect x="977" y="151" width="8" height="10"/><rect x="990" y="156" width="8" height="5"/><rect x="1003" y="143" width="8" height="18"/><rect x="1016" y="151" width="8" height="10"/><rect x="1029" y="157" width="8" height="4"/><rect x="1042" y="137" width="8" height="24" fill="#d8ff66"/><rect x="1055" y="153" width="8" height="8"/><rect x="1068" y="147" width="8" height="14"/><rect x="1081" y="156" width="8" height="5"/><rect x="1094" y="151" width="8" height="10"/><rect x="1107" y="157" width="8" height="4"/><rect x="1120" y="143" width="8" height="18" fill="#d8ff66"/><rect x="1133" y="153" width="8" height="8"/><rect x="1146" y="151" width="8" height="10"/><rect x="1159" y="156" width="8" height="5"/><rect x="1172" y="149" width="8" height="12"/><rect x="1185" y="156" width="8" height="5"/><rect x="1198" y="140" width="8" height="21" fill="#d8ff66"/><rect x="1211" y="151" width="8" height="10"/><rect x="1224" y="154" width="8" height="7"/>
+    </g>
+  </g>
+
+  <!-- Telemetry -->
+  <g transform="translate(120 489)">
+    <rect width="852" height="365" fill="#101417" fill-opacity=".76" stroke="#e0e8e5" stroke-opacity=".14"/>
+    <text x="26" y="33" fill="#6fe7df" font-family="Cascadia Mono, Consolas, monospace" font-size="10" font-weight="700" letter-spacing="1.7">SYSTEM TELEMETRY</text>
+    <text x="26" y="65" fill="#e8ece8" font-family="Bahnschrift Condensed, Segoe UI, sans-serif" font-size="26">MEMORY PRESSURE OVER TIME</text>
+    <g font-family="Cascadia Mono, Consolas, monospace" font-size="9">
+      <line x1="610" y1="29" x2="624" y2="29" stroke="#d8ff66" stroke-width="2"/><text x="631" y="32" fill="#d8ff66">COMMIT</text>
+      <line x1="694" y1="29" x2="708" y2="29" stroke="#6fe7df" stroke-width="2"/><text x="715" y="32" fill="#6fe7df">AVAILABLE</text>
+      <line x1="791" y1="29" x2="805" y2="29" stroke="#ffb85c" stroke-width="2"/><text x="812" y="32" fill="#ffb85c">CPU</text>
+    </g>
+    <path d="M0 86H852" stroke="#e0e8e5" stroke-opacity=".12"/>
+    <rect x="24" y="105" width="804" height="205" fill="url(#grid)"/>
+    <path d="M24 253 C82 242 111 251 161 226 S252 233 304 210 S393 221 445 195 S544 208 597 184 S698 191 828 159 L828 310 L24 310Z" fill="url(#chartFill)"/>
+    <path d="M24 253 C82 242 111 251 161 226 S252 233 304 210 S393 221 445 195 S544 208 597 184 S698 191 828 159" fill="none" stroke="#d8ff66" stroke-width="2.3"/>
+    <path d="M24 183 C91 169 124 188 181 178 S279 167 345 181 S442 166 510 174 S621 159 683 169 S761 153 828 162" fill="none" stroke="#6fe7df" stroke-width="1.7"/>
+    <path d="M24 286 C80 283 116 263 165 277 S267 245 319 273 S405 235 459 266 S559 240 618 271 S723 229 828 254" fill="none" stroke="#ffb85c" stroke-width="1.3" stroke-dasharray="5 6"/>
+    <g fill="#59635e" font-family="Cascadia Mono, Consolas, monospace" font-size="9">
+      <text x="24" y="340">09:20</text><text x="426" y="340" text-anchor="middle">09:50</text><text x="828" y="340" text-anchor="end">NOW</text>
+    </g>
+  </g>
+
+  <!-- Signals -->
+  <g transform="translate(988 489)">
+    <rect width="402" height="365" fill="#101417" fill-opacity=".76" stroke="#e0e8e5" stroke-opacity=".14"/>
+    <text x="26" y="33" fill="#6fe7df" font-family="Cascadia Mono, Consolas, monospace" font-size="10" font-weight="700" letter-spacing="1.7">PRESSURE SIGNAL</text>
+    <text x="26" y="65" fill="#e8ece8" font-family="Bahnschrift Condensed, Segoe UI, sans-serif" font-size="26">WHAT NEEDS ATTENTION</text>
+    <rect x="346" y="24" width="30" height="30" fill="none" stroke="#e0e8e5" stroke-opacity=".22"/>
+    <text x="361" y="44" fill="#ffb85c" text-anchor="middle" font-family="Cascadia Mono, Consolas, monospace" font-size="11">2</text>
+    <path d="M0 86H402" stroke="#e0e8e5" stroke-opacity=".12"/>
+    <rect y="86" width="402" height="62" fill="#d8ff66" fill-opacity=".025"/>
+    <text x="26" y="110" fill="#89928e" font-family="Cascadia Mono, Consolas, monospace" font-size="9" letter-spacing="1.2">POTENTIAL RECLAIM</text>
+    <text x="26" y="133" fill="#d8ff66" font-family="Cascadia Mono, Consolas, monospace" font-size="12" font-weight="700">4.9 GB  +  6.4% CPU</text>
+    <text x="376" y="130" fill="#5f6964" text-anchor="end" font-family="Cascadia Mono, Consolas, monospace" font-size="9">2 ACTIVE</text>
+    <g transform="translate(26 177)">
+      <circle cx="4" cy="4" r="4" fill="#ffb85c"/>
+      <text x="22" y="7" fill="#e8ece8" font-family="Cascadia Mono, Consolas, monospace" font-size="11" font-weight="700">BROWSER WORKSPACE</text>
+      <text x="350" y="7" fill="#ffb85c" text-anchor="end" font-family="Cascadia Mono, Consolas, monospace" font-size="11">842 MB</text>
+      <text x="22" y="30" fill="#89928e" font-family="Segoe UI, sans-serif" font-size="12">Idle for 42 minutes with no visible window.</text>
+      <path d="M0 55H350" stroke="#e0e8e5" stroke-opacity=".12"/>
+    </g>
+    <g transform="translate(26 253)">
+      <circle cx="4" cy="4" r="4" fill="#ffb85c"/>
+      <text x="22" y="7" fill="#e8ece8" font-family="Cascadia Mono, Consolas, monospace" font-size="11" font-weight="700">LOCAL MODEL RUNTIME</text>
+      <text x="350" y="7" fill="#ffb85c" text-anchor="end" font-family="Cascadia Mono, Consolas, monospace" font-size="11">4.1 GB</text>
+      <text x="22" y="30" fill="#89928e" font-family="Segoe UI, sans-serif" font-size="12">Large resident model; verify current session need.</text>
+      <path d="M0 55H350" stroke="#e0e8e5" stroke-opacity=".12"/>
+    </g>
+    <g transform="translate(26 329)">
+      <circle cx="4" cy="4" r="4" fill="#d8ff66" filter="url(#glow)"/>
+      <text x="22" y="7" fill="#e8ece8" font-family="Cascadia Mono, Consolas, monospace" font-size="11" font-weight="700">SYSTEM PRESSURE</text>
+      <text x="350" y="7" fill="#d8ff66" text-anchor="end" font-family="Cascadia Mono, Consolas, monospace" font-size="11">CLEAR</text>
+    </g>
+  </g>
+
+  <rect x="1162" y="871" width="228" height="19" rx="9.5" fill="#151a1d" stroke="#e0e8e5" stroke-opacity=".14"/>
+  <text x="1276" y="884" fill="#89928e" text-anchor="middle" font-family="Cascadia Mono, Consolas, monospace" font-size="8" letter-spacing="1">ILLUSTRATIVE SAMPLE DATA</text>
+</svg>
